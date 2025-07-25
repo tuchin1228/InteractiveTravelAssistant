@@ -217,6 +217,58 @@
             let audioSource = null;
             let currentAudio = null;
             let currentResponse = null;
+            
+            // 載入可用的語言選項
+            async function loadAvailableLanguages() {
+                try {
+                    // 獲取當前選中的語言值
+                    const currentSelectedLang = uploadLanguageSelector.value;
+                    
+                    // 顯示載入中狀態
+                    uploadLanguageSelector.disabled = true;
+                    
+                    // 從API獲取支援的語言列表
+                    const response = await fetch('/api/languages');
+                    if (!response.ok) {
+                        throw new Error(`無法獲取語言列表: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    if (data && data.translation) {
+                        // 清空當前的選項
+                        uploadLanguageSelector.innerHTML = '';
+                        
+                        // 將API返回的語言添加為選項
+                        Object.keys(data.translation).forEach(langCode => {
+                            console.log('langCode',langCode);
+                            
+                            const langInfo = data.translation[langCode];
+                            const option = document.createElement('option');
+                            option.value = langCode;
+                            option.textContent = `${langInfo.name} (${langInfo.nativeName})`;
+                            
+                            // 如果是之前選中的語言，設置為選中
+                            if (langCode === currentSelectedLang) {
+                                option.selected = true;
+                            }
+                            
+                            uploadLanguageSelector.appendChild(option);
+                        });
+                        
+                        console.log('語言選項已更新，共載入', Object.keys(data.translation).length, '種語言');
+                    } else {
+                        console.error('API返回的語言數據格式不正確', data);
+                    }
+                } catch (error) {
+                    console.error('載入語言列表失敗:', error);
+                    // 載入失敗時，保持原有的語言選項
+                } finally {
+                    uploadLanguageSelector.disabled = false;
+                }
+            }
+            
+            // 頁面載入時獲取可用語言列表
+            loadAvailableLanguages();
 
             // 初始化音頻上下文
             function initAudioContext() {

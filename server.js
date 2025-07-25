@@ -199,15 +199,36 @@ async function generateResponse(searchResults) {
 
 
 // 翻譯 OpenAI 回應
-async function translateResponse(responseText, targetLanguage = "zh-Hant") {
+async function translateResponse(responseText, targetLanguage = "zh") {
     try {
         console.log("🌐 開始翻譯回應...");
 
-
+        // 標準化語言代碼
+        // 處理特殊情況：如果目標語言是簡體中文或繁體中文的特殊代碼
+        let translationTargetLanguage = targetLanguage;
+        
+        // 語言代碼標準化映射表 (Translation API 使用的標準)
+        const languageCodeMap = {
+            'zh-tw': 'zh-Hant',
+            'zh-hk': 'zh-Hant',
+            'zh-mo': 'zh-Hant',
+            'zh-cn': 'zh-Hans',
+            'zh-sg': 'zh-Hans',
+            'zh-my': 'zh-Hans',
+            'zh': 'zh-Hans'  // 默認為簡體中文
+        };
+        
+        // 轉換為小寫以進行不區分大小寫的比較
+        const lowerCaseTargetLang = targetLanguage.toLowerCase();
+        
+        if (languageCodeMap[lowerCaseTargetLang]) {
+            translationTargetLanguage = languageCodeMap[lowerCaseTargetLang];
+            console.log(`標準化語言代碼：'${targetLanguage}' -> '${translationTargetLanguage}'`);
+        }
 
         const inputText = [{ text: responseText }];
         const parameters = {
-            to: targetLanguage,
+            to: translationTargetLanguage,
             from: "zh",
         };
         const translateResponse = await translationClient.path("/translate").post({
@@ -215,11 +236,13 @@ async function translateResponse(responseText, targetLanguage = "zh-Hant") {
             queryParameters: parameters,
         });
 
-        return translateResponse?.body[0]?.translations[0]?.text
-
+        const translatedText = translateResponse?.body[0]?.translations[0]?.text;
+        console.log(`🌐 翻譯完成 (${translationTargetLanguage})`);
+        return translatedText;
 
     } catch (error) {
         console.error("❌ 翻譯失敗:", error);
+        console.error("錯誤詳情:", error.message);
         return responseText;
     }
 }
@@ -229,8 +252,28 @@ async function translateResponse(responseText, targetLanguage = "zh-Hant") {
 async function textToSpeech(text, targetLanguage = "zh") {
 
     let finalText = text;
-    let languageToUse = targetLanguage;
     let timeout = 30000; // 預設超時時間 30 秒
+    
+    // 建立從 Translation API 語言代碼到 Speech API 語言代碼的映射
+    // Translation API 使用的是 ISO 639 語言代碼，而 Speech API 使用的是 BCP-47 標準
+    const translationToSpeechLangMap = {
+        // 特殊處理的語言映射 (需特別注意的差異)
+        'zh-Hans': 'zh-CN',
+        'zh-Hant': 'zh-TW',
+        'zh-CN': 'zh-CN',  // 保持一致，簡體中文
+        'zh-TW': 'zh-TW',  // 保持一致，繁體中文
+        'zh': 'zh-TW',     
+        'pt-PT': 'pt-PT',
+        'pt-BR': 'pt-BR',
+        'pt': 'pt-BR',     // 預設巴西葡萄牙語
+        'en-GB': 'en-GB',
+        'en-US': 'en-US',
+        'en': 'en-US',     // 預設美式英語
+    };
+    
+    // 獲取映射後的語言代碼
+    let languageToUse = translationToSpeechLangMap[targetLanguage] || targetLanguage;
+    
     // Azure Speech SDK 支援的語言對應表
     const supportedSpeechLanguages = {
         'af': { lang: 'af-ZA', voice: 'af-ZA-AdriNeural' },
@@ -247,6 +290,8 @@ async function textToSpeech(text, targetLanguage = "zh") {
         'de': { lang: 'de-DE', voice: 'de-DE-KatjaNeural' },
         'el': { lang: 'el-GR', voice: 'el-GR-AthinaNeural' },
         'en': { lang: 'en-US', voice: 'en-US-AriaNeural' },
+        'en-GB': { lang: 'en-GB', voice: 'en-GB-SoniaNeural' },
+        'en-US': { lang: 'en-US', voice: 'en-US-AriaNeural' },
         'es': { lang: 'es-ES', voice: 'es-ES-ElviraNeural' },
         'et': { lang: 'et-EE', voice: 'et-EE-AnuNeural' },
         'fa': { lang: 'fa-IR', voice: 'fa-IR-DilaraNeural' },
@@ -305,14 +350,25 @@ async function textToSpeech(text, targetLanguage = "zh") {
         'ur': { lang: 'ur-PK', voice: 'ur-PK-UzmaNeural' },
         'uz': { lang: 'uz-UZ', voice: 'uz-UZ-MadinaNeural' },
         'vi': { lang: 'vi-VN', voice: 'vi-VN-HoaiMyNeural' },
-        'zh': { lang: 'zh-CN', voice: 'zh-CN-XiaoxiaoNeural' },
+        'zh-CN': { lang: 'zh-CN', voice: 'zh-CN-XiaoxiaoNeural' },
+        'zh-TW': { lang: 'zh-TW', voice: 'zh-TW-HsiaoChenNeural' }, // 繁體中文 (台灣)
+        'zh-Hans': { lang: 'zh-CN', voice: 'zh-CN-XiaoxiaoNeural' }, // 簡體中文
+        'zh-Hant': { lang: 'zh-TW', voice: 'zh-TW-HsiaoChenNeural' }, // 繁體中文
         'zu': { lang: 'zu-ZA', voice: 'zu-ZA-ThandoNeural' }
     };
 
     // 檢查語言是否支援語音合成
     let isSpeechLanguageSupported = supportedSpeechLanguages.hasOwnProperty(languageToUse);
     if (!isSpeechLanguageSupported) {
-        throw new Error(`不支援 '${languageToUse}' 語言的語音合成。`);
+        console.warn(`警告：不支援 '${languageToUse}' 語言的語音合成，嘗試使用基礎語言碼...`);
+        // 嘗試只使用基本語言碼 (例如從 'zh-Hant' 轉為 'zh')
+        const baseLanguageCode = languageToUse.split('-')[0];
+        if (supportedSpeechLanguages.hasOwnProperty(baseLanguageCode)) {
+            console.log(`使用基礎語言代碼 '${baseLanguageCode}' 代替 '${languageToUse}'`);
+            languageToUse = baseLanguageCode;
+        } else {
+            throw new Error(`不支援 '${languageToUse}' 或其基礎語言 '${baseLanguageCode}' 的語音合成。`);
+        }
     }
 
 
