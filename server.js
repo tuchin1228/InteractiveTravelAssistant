@@ -23,6 +23,7 @@ const { AzureOpenAI } = require("openai");
 const axios = require("axios");
 const { text } = require("stream/consumers");
 require("dotenv").config();
+const { BlobServiceClient } = require('@azure/storage-blob');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -404,6 +405,22 @@ async function textToSpeech(text, targetLanguage = "zh") {
 }
 
 
+async function GetStorageMetadata(searchResults) {
+    if (!searchResults || searchResults.length === 0) {
+        console.warn("⚠️ 無法獲取存儲元數據，因為沒有搜尋結果");
+        return null;
+    }
+    const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+    const containerClient = blobServiceClient.getContainerClient("attractions-intro");
+    const blobClient = containerClient.getBlobClient(searchResults[0].document_title);
+
+    const properties = await blobClient.getProperties();
+    console.log("Linked file metadata:", properties?.metadata?.imgurl);  // 會印出 target.pdf 或 URL
+    
+    return properties?.metadata?.imgurl || null;
+}
+
+
 // 取得翻譯語言列表
 app.get("/api/languages", async (req, res) => {
     try {
@@ -457,7 +474,7 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
         // 翻譯到用戶選擇的語言
         response.text = await translateResponse(response.text, language);
         console.log(`翻譯後的回應 (${language}):`, response.text);
-        
+
         // 儲存選擇的語言
         response.language = language;
 
@@ -478,14 +495,17 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
             response.audioError = error.message;
         }
 
-
+        const imgurl = await GetStorageMetadata(searchResults);
+        
+        
         console.log('流程完成');
 
 
         // 返回分析結果給客戶端，包含智能回應
         return res.json({
             results: searchResults,
-            response: response
+            response: response,
+            imgurl: imgurl
         });
 
     } catch (error) {
@@ -501,19 +521,19 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 app.post("/api/translate", express.json(), async (req, res) => {
     try {
         const { text, language, originalContent } = req.body;
-        
+
         if (!text) {
             return res.status(400).json({ error: "缺少文字內容" });
         }
-        
+
         console.log(`🌐 開始翻譯到 ${language}...`);
-        
+
         // 翻譯文字到目標語言
         const translatedText = await translateResponse(text, language);
-        
+
         // 生成語音
         const speechResult = await textToSpeech(translatedText, language);
-        
+
         // 返回結果
         return res.json({
             text: translatedText,
@@ -525,7 +545,7 @@ app.post("/api/translate", express.json(), async (req, res) => {
                 size: speechResult.audioDataSize
             }
         });
-        
+
     } catch (error) {
         console.error("❌ 翻譯或語音合成失敗:", error);
         return res.status(500).json({ error: "翻譯或語音合成失敗" });

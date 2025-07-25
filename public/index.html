@@ -140,6 +140,18 @@
         </div>
 
         <div class="upload-container">
+            <div class="language-selector mb-3">
+                <label class="form-label">選擇語言:</label>
+                <select class="form-select" id="upload-language-selector">
+                    <option value="zh">中文</option>
+                    <option value="en">English</option>
+                    <option value="ja">日本語</option>
+                    <option value="ko">한국어</option>
+                    <option value="fr">Français</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                </select>
+            </div>
             <div class="row">
                 <div class="col-md-6">
                     <div class="upload-area" id="upload-area">
@@ -151,28 +163,10 @@
                 </div>
                 <div class="col-md-6">
                     <div class="preview-container" id="preview-container" style="display: none;">
-                        <h4 class="mb-3">照片預覽</h4>
+                        <!-- <h5 class="mb-3 text-sm">照片預覽</h5> -->
                         <img id="upload-preview" class="img-fluid rounded mb-3" style="max-height: 200px; width: auto;" />
-                        
-                        <div class="language-selector mb-3">
-                            <label class="form-label">選擇語言:</label>
-                            <select class="form-select" id="upload-language-selector">
-                                <option value="zh">中文</option>
-                                <option value="en">English</option>
-                                <option value="ja">日本語</option>
-                                <option value="ko">한국어</option>
-                                <option value="fr">Français</option>
-                                <option value="de">Deutsch</option>
-                                <option value="es">Español</option>
-                            </select>
-                        </div>
                     </div>
                 </div>
-            </div>
-            <div class="text-center mt-3">
-                <button class="btn btn-primary" id="upload-btn" disabled>
-                    <i class="bi bi-cloud-upload"></i> 開始分析
-                </button>
             </div>
         </div>
 
@@ -209,7 +203,6 @@
         document.addEventListener('DOMContentLoaded', () => {
             const uploadArea = document.getElementById('upload-area');
             const fileInput = document.getElementById('file-input');
-            const uploadBtn = document.getElementById('upload-btn');
             const loading = document.getElementById('loading');
             const resultContainer = document.getElementById('result-container');
             const previewImage = document.getElementById('preview-image');
@@ -271,36 +264,35 @@
             // 處理選擇的檔案
             function handleFile(file) {
                 selectedFile = file;
-                uploadBtn.disabled = false;
                 
                 // 顯示預覽區域
                 document.getElementById('preview-container').style.display = 'block';
                 
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    // 設置上傳預覽圖
+                    // 只設置上傳預覽圖，不設置結果預覽圖
                     document.getElementById('upload-preview').src = e.target.result;
-                    // 同時設置結果預覽圖
-                    previewImage.src = e.target.result;
+                    // 移除自動設置結果預覽圖的行為，等API回傳的imgurl使用
                 };
                 reader.readAsDataURL(file);
+                
+                // 清除上一次的結果並直接上傳分析
+                resultContainer.style.display = 'none';
+                uploadImage(file);
             }
-
-            // 上傳按鈕點擊事件
-            uploadBtn.addEventListener('click', () => {
-                if (selectedFile) {
-                    uploadImage(selectedFile);
-                }
-            });
 
             // 上傳圖片到API
             async function uploadImage(file) {
-                loading.style.display = 'block';
+                // 清除上一次的結果
                 resultContainer.style.display = 'none';
+                resultTitle.textContent = '景點資訊';
+                resultText.textContent = '';
+                
+                loading.style.display = 'block';
                 playBtn.disabled = true;
 
                 // 獲取選擇的語言
-                const selectedLanguage = document.getElementById('upload-language-selector').value;
+                const selectedLanguage = uploadLanguageSelector.value;
                 
                 const formData = new FormData();
                 formData.append('image', file);
@@ -333,6 +325,11 @@
                 resultContainer.style.display = 'block';
                 
                 const response = data.response;
+                
+                // 使用API回傳的imgurl屬性來設定preview-image的圖片來源
+                if (data.imgurl) {
+                    previewImage.src = data.imgurl;
+                }
                 
                 if (response.type === 'success') {
                     resultTitle.textContent = data.results[0]?.title || '景點資訊';
