@@ -176,9 +176,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const response = data.response;
 
-        // 使用API回傳的imgurl屬性來設定preview-image的圖片來源
-        if (data.imgurl) {
+        // 如果搜尋成功且有 imgurl，使用 API 回傳的圖片，否則使用上傳的預覽圖
+        if (response.type === 'success' && data.imgurl) {
             previewImage.src = data.imgurl;
+        } else {
+            // 使用使用者上傳的圖片
+            previewImage.src = document.getElementById('upload-preview').src;
         }
 
         if (response.type === 'success') {

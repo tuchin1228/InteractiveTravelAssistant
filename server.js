@@ -125,8 +125,19 @@ async function searchAttractions(imageBuffer) {
             }
         );
         console.log("🔍 搜尋結果:", searchResults?.data?.value[0]);
-        const results = searchResults?.data?.value
+        const results = searchResults?.data?.value;
 
+        // 檢查第一筆搜尋結果的分數
+        if (results && results.length > 0) {
+            const firstResultScore = results[0]['@search.score'];
+            console.log("🎯 第一筆搜尋結果分數:", firstResultScore);
+            
+            // 如果分數小於 0.62，視為未找到匹配結果
+            if (firstResultScore < 0.62) {
+                console.log("⚠️ 搜尋結果分數過低，視為未找到匹配結果");
+                return [];
+            }
+        }
 
         return results;
     } catch (error) {
@@ -175,8 +186,7 @@ async function generateResponse(searchResults) {
                 4.景點開放時間(opening_hours)
                 並確保文字敘述流暢、通順。` },
             ],
-            model: "gpt-4o",
-            temperature: 0.7,
+            model: "gpt-4o"
         });
         const response = events.choices[0].message.content;
         console.log("🤖 回應生成成功:", response);
