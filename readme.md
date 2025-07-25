@@ -1,6 +1,12 @@
+<div align="center">
+
 # 互動式旅遊導覽助手
+[[English]](README.en.md)
 
 本專案是一個互動式旅遊導覽應用，用戶可以上傳景點照片，系統會識別景點並提供詳細資訊與語音導覽。
+
+</div>
+
 
 ## 功能特色
 
@@ -105,9 +111,16 @@ npm run dev
 4. 使用Azure OpenAI (gpt-4o) 生成景點的詳細介紹
 5. 使用Azure AI Translation將文本翻譯成用戶選擇的語言
 6. 使用Azure AI Speech將文本轉換為語音
-7. 從Azure Blob Storage取得景點高清圖片URL (如有)
+7. 從Azure Blob Storage取得景點高清圖片URL
 8. 將所有結果打包並回傳給前端
 9. 前端展示文本說明和圖片，並提供語音播放功能
+
+## 資料預處理流程
+
+1. 將景點圖片與介紹上傳至Azure Blob Storage
+3. 將圖片和文本資料透過Azure AI Search進行向量化處理
+4. Azure AI Search使用多模態向量索引
+5. 建立向量化索引以支援圖像相似度搜尋和文本語意搜尋
 
 
 
