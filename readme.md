@@ -123,4 +123,8 @@ npm run dev
 5. 建立向量化索引以支援圖像相似度搜尋和文本語意搜尋
 
 
+## 畫面截圖
+![Screenshot 1](https://github.com/user-attachments/assets/c2443238-5818-4160-ad53-1ff0c9ce7813)
+
+![Screenshot 2](https://github.com/user-attachments/assets/8e4d7432-eb0b-4d2c-95e5-62de298bcecf)
 

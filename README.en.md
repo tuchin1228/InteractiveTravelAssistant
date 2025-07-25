@@ -119,3 +119,10 @@ Open browser and visit http://localhost:3000
 2. Process images and text data through Azure AI Search for vectorization
 3. Azure AI Search uses multimodal vector index
 4. Create vectorized index to support image similarity search and text semantic search
+
+
+## Screenshots
+![Screenshot 1](https://github.com/user-attachments/assets/c2443238-5818-4160-ad53-1ff0c9ce7813)
+
+![Screenshot 2](https://github.com/user-attachments/assets/8e4d7432-eb0b-4d2c-95e5-62de298bcecf)
+
