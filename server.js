@@ -31,22 +31,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static("public"));
-app.use("/audio", express.static("audio_output"));
 
 
-// 檔案上傳設定
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = "./uploads";
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    },
-});
+// 檔案上傳設定 - 使用記憶體存儲
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 
@@ -236,75 +224,8 @@ async function translateResponse(responseText, targetLanguage = "zh-Hant") {
 }
 
 
-// 1. 網路連接測試
-async function testNetworkConnectivity() {
-    console.log('🌐 測試網路連接性...');
-
-    const testUrls = [
-        'https://cognitiveservices.azure.com',
-        `https://${process.env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com`,
-        'https://eastus.tts.speech.microsoft.com' // 備用測試
-    ];
-
-    for (const url of testUrls) {
-        try {
-            console.log(`測試連接: ${url}`);
-            const response = await axios.get(url, {
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Azure-Speech-Test/1.0'
-                }
-            });
-            console.log(`✅ ${url} - 狀態: ${response.status}`);
-        } catch (error) {
-            console.error(`❌ ${url} - 錯誤: ${error.message}`);
-            if (error.code === 'ENOTFOUND') {
-                console.error('   DNS 解析失敗，可能是網路連接問題');
-            } else if (error.code === 'ECONNREFUSED') {
-                console.error('   連接被拒絕，可能是防火牆問題');
-            } else if (error.code === 'ETIMEDOUT') {
-                console.error('   連接超時，可能是網路延遲問題');
-            }
-        }
-    }
-}
-
-// 2. Azure Speech 服務健康檢查
-async function checkAzureSpeechHealth() {
-    console.log('🏥 檢查 Azure Speech 服務健康狀態...');
-
-    try {
-        const region = process.env.AZURE_SPEECH_REGION;
-        const key = process.env.AZURE_SPEECH_KEY;
-
-        // 使用 REST API 測試服務可用性
-        const response = await axios.get(
-            `https://${region}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
-            {
-                headers: {
-                    'Ocp-Apim-Subscription-Key': key
-                },
-                timeout: 15000
-            }
-        );
-
-        console.log(`✅ Azure Speech 服務正常 (可用語音數: ${response.data.length})`);
-        return true;
-    } catch (error) {
-        console.error('❌ Azure Speech 服務異常:', error.response?.status, error.message);
-
-        if (error.response?.status === 401) {
-            console.error('   認證失敗：請檢查 AZURE_SPEECH_KEY');
-        } else if (error.response?.status === 403) {
-            console.error('   權限不足：請檢查訂閱配額');
-        }
-        return false;
-    }
-}
-
-
-// 文字轉語音
-async function textToSpeech(text, targetLanguage = "zh", outputFileName = "output.wav") {
+// 文字轉語音 - 直接返回語音數據，不儲存檔案
+async function textToSpeech(text, targetLanguage = "zh") {
 
     let finalText = text;
     let languageToUse = targetLanguage;
@@ -400,36 +321,19 @@ async function textToSpeech(text, targetLanguage = "zh", outputFileName = "outpu
 
 
     try {
-        console.log("🔊 開始文字轉語音...");
-        console.log('=== Azure Speech 配置資訊 ===');
-        console.log(`語音金鑰: ${process.env.AZURE_SPEECH_KEY.substring(0, 8)}...`);
-        console.log(`服務區域: ${process.env.AZURE_SPEECH_REGION}`);
-        console.log(`目標語言: ${voiceConfig.lang}`);
-        console.log(`選用語音: ${voiceConfig.voice}`);
-        console.log(`輸出檔案: ${outputFileName}`);
-        console.log(`文字長度: ${finalText.length} 字符`);
-
-        // 建立新的 Azure Speech 配置，避免與全局 speechConfig 衝突
-        const speechServiceConfig = SpeechConfig.fromSubscription(
-            process.env.AZURE_SPEECH_KEY,
-            process.env.AZURE_SPEECH_REGION
-        );
 
         // 設定語言與語音
-        speechServiceConfig.speechSynthesisLanguage = voiceConfig.lang;
-        speechServiceConfig.speechSynthesisVoiceName = voiceConfig.voice;
+        speechConfig.speechSynthesisLanguage = voiceConfig.lang;
+        speechConfig.speechSynthesisVoiceName = voiceConfig.voice;
 
         // 4. 設定音頻格式（可能解決相容性問題）
-        speechServiceConfig.speechSynthesisOutputFormat = SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3;
+        speechConfig.speechSynthesisOutputFormat = SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3;
 
         // 5. 啟用詳細日誌
-        speechServiceConfig.enableAudioLogging = true;
+        speechConfig.enableAudioLogging = true;
 
-        // 6. 建立音頻配置
-        const audioConfig = AudioConfig.fromAudioFileOutput(outputFileName);
-
-        // 7. 建立語音合成器
-        const synthesizer = new SpeechSynthesizer(speechServiceConfig, audioConfig);
+        // 6. 建立語音合成器 - 不指定音頻配置，讓語音數據保存在結果中
+        const synthesizer = new SpeechSynthesizer(speechConfig);
 
         // 8. 加入超時處理
         return new Promise((resolve, reject) => {
@@ -445,21 +349,6 @@ async function textToSpeech(text, targetLanguage = "zh", outputFileName = "outpu
                 console.log('🎵 語音合成開始...');
             };
 
-            // 監聽合成進行中事件
-            synthesizer.synthesizing = (s, e) => {
-                console.log(`🔄 合成進度: ${e.result.audioDuration / 10000}ms`);
-            };
-
-            // 監聽取消事件
-            synthesizer.SynthesisCanceled = (s, e) => {
-                console.error('❌ 語音合成被取消:', e.reason);
-                if (e.reason === CancellationReason.Error) {
-                    console.error('錯誤詳情:', e.errorDetails);
-                }
-                clearTimeout(timeoutId);
-                synthesizer.close();
-                reject(new Error(`語音合成被取消: ${e.reason} - ${e.errorDetails}`));
-            };
 
             // 執行語音合成
             synthesizer.speakTextAsync(
@@ -468,21 +357,24 @@ async function textToSpeech(text, targetLanguage = "zh", outputFileName = "outpu
                     clearTimeout(timeoutId);
 
                     console.log('=== 合成結果 ===');
-                    console.log(`結果原因: ${result.reason}`);
-                    console.log(`音頻長度: ${result.audioData ? result.audioData.byteLength : 0} bytes`);
 
                     if (result.reason === ResultReason.SynthesizingAudioCompleted) {
-                        console.log(`✅ 語音合成成功，已保存到: ${outputFileName}`);
+                        console.log(`✅ 語音合成成功`);
                         console.log(`🎵 音頻時長: ${result.audioDuration / 10000}ms`);
+
+                        // 將音頻二進制數據轉換為 Base64 字串，方便傳輸
+                        const audioData = Buffer.from(result.audioData);
+                        const audioBase64 = audioData.toString('base64');
 
                         resolve({
                             success: true,
                             language: voiceConfig.lang,
                             text: finalText,
                             voice: voiceConfig.voice,
-                            audioFile: outputFileName,
+                            audioContent: audioBase64, // 直接返回 Base64 編碼的音頻數據
                             audioDuration: result.audioDuration,
-                            audioDataSize: result.audioData.byteLength
+                            audioDataSize: result.audioData.byteLength,
+                            contentType: "audio/mp3" // 設定為 MP3 格式
                         });
                     } else {
                         console.error("❌ 語音合成失敗:");
@@ -512,33 +404,46 @@ async function textToSpeech(text, targetLanguage = "zh", outputFileName = "outpu
 }
 
 
+// 取得翻譯語言列表
+app.get("/api/languages", async (req, res) => {
+    try {
+        const translateList = await translationClient.path("/languages").get();
+        // #response
+        // {
+        //     "translation": {
+        //     "af": {
+        //         "name": "Afrikaans",
+        //         "nativeName": "Afrikaans",
+        //         "dir": "ltr"
+        //     },
+        //     "am": {
+        //         "name": "Amharic",
+        //         "nativeName": "አማርኛ",
+        //         "dir": "ltr"
+        //     }
+        // ...}
+
+        res.json(translateList.body);
+    } catch (error) {
+        console.error("❌ 取得翻譯語言列表失敗:", error);
+        res.status(500).json({ error: "無法取得翻譯語言列表" });
+    }
+});
+
 // 圖片分析端點
 app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 
-    // Step 2: 網路連接測試
-    console.log('2️⃣ 網路連接測試');
-    await testNetworkConnectivity();
-    console.log('');
-
-    // Step 3: Azure 服務健康檢查
-    console.log('3️⃣ Azure 服務健康檢查');
-    const isHealthy = await checkAzureSpeechHealth();
-    if (!isHealthy) {
-        throw new Error('Azure Speech 服務不可用');
-    }
-    console.log('');
-
-    return [];
 
     try {
         if (!req.file) {
             return res.status(400).json({ error: "請上傳圖片檔案" });
         }
-        const imageBuffer = fs.readFileSync(req.file.path);
+        const imageBuffer = req.file.buffer;
 
+        // 獲取用戶選擇的語言
+        const language = req.body.language || "zh";
 
-
-        console.log("📷 接收到圖片，開始分析...");
+        console.log(`📷 接收到圖片，開始分析... 選擇語言: ${language}`);
 
 
         // 1.圖片搜尋
@@ -549,24 +454,25 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
         const response = await generateResponse(searchResults);
         console.log("OpenAI 回應:", response);
 
-        // 翻譯
-        response.text = await translateResponse(response.text, "en");
-        console.log("翻譯後的回應:", response.text);
+        // 翻譯到用戶選擇的語言
+        response.text = await translateResponse(response.text, language);
+        console.log(`翻譯後的回應 (${language}):`, response.text);
+        
+        // 儲存選擇的語言
+        response.language = language;
 
 
-        // 文字轉語音 - 建立音訊檔案目錄
-        const audioDir = "./audio_output";
-        if (!fs.existsSync(audioDir)) {
-            fs.mkdirSync(audioDir, { recursive: true });
-        }
-
-        // 建立唯一的音訊檔案名稱
-        const audioFileName = `${audioDir}/speech_${Date.now()}.wav`;
-
+        // 文字轉語音 - 直接在記憶體中處理並回傳
         try {
-            const speechResult = await textToSpeech(response.text, "en", audioFileName);
-            // response.audio = speechResult.audioFile.replace("./", "/"); // 轉換為相對URL路徑
-            // console.log("語音合成完成:", response.audio);
+            const speechResult = await textToSpeech(response.text, language);
+            // 將音頻資料添加到回應中
+            response.audio = {
+                content: speechResult.audioContent,
+                contentType: speechResult.contentType,
+                duration: speechResult.audioDuration,
+                size: speechResult.audioDataSize
+            };
+            console.log("語音合成完成，音頻數據已添加到回應中");
         } catch (error) {
             console.error("語音合成錯誤:", error);
             response.audioError = error.message;
@@ -589,6 +495,42 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 
 });
 
+
+
+// 語言翻譯和語音合成 API
+app.post("/api/translate", express.json(), async (req, res) => {
+    try {
+        const { text, language, originalContent } = req.body;
+        
+        if (!text) {
+            return res.status(400).json({ error: "缺少文字內容" });
+        }
+        
+        console.log(`🌐 開始翻譯到 ${language}...`);
+        
+        // 翻譯文字到目標語言
+        const translatedText = await translateResponse(text, language);
+        
+        // 生成語音
+        const speechResult = await textToSpeech(translatedText, language);
+        
+        // 返回結果
+        return res.json({
+            text: translatedText,
+            language: language,
+            audio: {
+                content: speechResult.audioContent,
+                contentType: speechResult.contentType,
+                duration: speechResult.audioDuration,
+                size: speechResult.audioDataSize
+            }
+        });
+        
+    } catch (error) {
+        console.error("❌ 翻譯或語音合成失敗:", error);
+        return res.status(500).json({ error: "翻譯或語音合成失敗" });
+    }
+});
 
 
 // 啟動應用程式
