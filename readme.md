@@ -97,7 +97,7 @@ AZURE_STORAGE_CONNECTION_STRING=your_storage_connection_string
 
 4. 啟動服務
 ```
-npm run dev
+npm start 
 ```
 
 5. 訪問應用

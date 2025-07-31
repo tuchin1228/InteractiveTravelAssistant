@@ -473,7 +473,7 @@ async function textToSpeech(text, targetLanguage = "zh") {
 
 async function GetStorageMetadata(searchResults) {
     if (!searchResults || searchResults.length === 0) {
-        console.warn("⚠️ 無法獲取存儲元數據，因為沒有搜尋結果");
+        console.warn("⚠️ 無法獲取存儲Metadata，因為沒有搜尋結果");
         return null;
     }
     const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
