@@ -185,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (response.type === 'success') {
-            resultTitle.textContent = data.results[0]?.title || '景點資訊';
+            resultTitle.textContent = data.results[0]?.title.replace(/\.[^/.]+$/, "") || '景點資訊';
             resultText.textContent = response.text;
 
             // 若有音頻數據，啟用播放按鈕

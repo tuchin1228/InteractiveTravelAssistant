@@ -46,6 +46,13 @@ let visionClient, speechConfig, translationClient, searchClient;
 // 🚀 初始化 Azure AI 服務
 function initializeAzureServices() {
     try {
+        // Search 服務
+        searchClient = new SearchClient(
+            process.env.AZURE_SEARCH_ENDPOINT,
+            process.env.AZURE_SEARCH_INDEX,
+            new AzureKeyCredential(process.env.AZURE_SEARCH_KEY)
+        );
+
         // Speech 服務
         speechConfig = SpeechConfig.fromSubscription(
             process.env.AZURE_SPEECH_KEY,
@@ -89,57 +96,59 @@ process.on("SIGINT", () => {
 
 
 // 🔍 搜尋景點函數
-async function searchAttractions(imageBuffer) {
+async function searchAttractions(searchText) {
     try {
         console.log("🔍 搜尋相關景點");
 
 
 
-        const searchOptions = {
-            "search": "*",
-            "count": true,
-            "vectorQueries": [
-                {
-                    "kind": "imageBinary",
-                    "base64Image": imageBuffer.toString("base64"),
-                    "fields": "content_embedding"
-                }
-            ],
-            "queryType": "semantic",
-            "semanticConfiguration": "multimodal-rag-1753341671830-semantic-configuration",
-            "captions": "extractive",
-            "answers": "extractive|count-3",
-            "queryLanguage": "en-us"
+        const options = {
+            top: 3,                          // 最多回傳 3 筆結果
+            select: ["title", "chunk"],      // 只取部分欄位
+            queryType: "semantic",           // 啟用語意搜尋
+            semanticConfiguration: "default", // 使用預設語意配置
+            queryLanguage: "zh-tw",          // 查詢語言設置為繁體中文
+            captions: "extractive",          // 返回摘要
+            answers: "extractive",           // 返回答案
+            semanticFields: ["title", "chunk"] // 指定用於語意排名的欄位
+        };
+
+        const SearchResults = await searchClient.search(searchText, options);
+
+
+        console.log("=== 最高分搜尋結果 ===");
+        let topResult = null;
+        let topScore = -1;
+
+        for await (const { document, score } of SearchResults.results) {
+            if (score > topScore) {
+                topScore = score;
+                topResult = document;
+            }
         }
 
-        // const searchResults = await searchClient.search(`simple`, searchOptions);
+        if (topResult) {
+            console.log(`Score: ${topScore.toFixed(2)}`);
+            console.log(topResult);
+        } else {
+            console.log("沒有找到任何結果");
+        }
 
-        const searchResults = await axios.post(
-            `${process.env.AZURE_SEARCH_ENDPOINT}/indexes/${process.env.AZURE_SEARCH_INDEX}/docs/search?api-version=2025-05-01-Preview`,
-            searchOptions,
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "api-key": process.env.AZURE_SEARCH_KEY,
-                },
-            }
-        );
-        console.log("🔍 搜尋結果:", searchResults?.data?.value[0]);
-        const results = searchResults?.data?.value;
+        console.log("🔍 搜尋結果:", topResult);
+        const results = topResult
 
         // 檢查第一筆搜尋結果的分數
         if (results && results.length > 0) {
-            const firstResultScore = results[0]['@search.score'];
+            const firstResultScore = topScore.toFixed(2);
             console.log("🎯 第一筆搜尋結果分數:", firstResultScore);
-            
-            // 如果分數小於 0.62，視為未找到匹配結果
-            if (firstResultScore < 0.62) {
+
+            // 如果分數小於 3，視為未找到匹配結果
+            if (firstResultScore < 3) {
                 console.log("⚠️ 搜尋結果分數過低，視為未找到匹配結果");
                 return [];
             }
         }
-
-        return results;
+        return [results];
     } catch (error) {
         console.error("❌ 景點搜尋失敗:", error);
         return [];
@@ -174,11 +183,13 @@ async function generateResponse(searchResults) {
             apiVersion: apiVersion
         });
 
+        console.log('prompt', searchResults[0]);
+
         const events = await client.chat.completions.create({
             messages: [
                 { role: "system", content: "你是一個資深導遊，擅長提供旅遊建議和景點資訊。" },
                 {
-                    role: "user", content: ` ${searchResults[0]?.content_text}。
+                    role: "user", content: ` ${searchResults[0]?.chunk}。
                 根據以上資料，生成結果為一段文字敘述，內容必須包含:
                 1.景點名稱(name)
                 2.景點歷史(history)
@@ -197,7 +208,7 @@ async function generateResponse(searchResults) {
             text: response,
             source: {
                 title: searchResults[0]?.title || "未知景點",
-                content: searchResults[0]?.content_text || ""
+                content: searchResults[0]?.chunk || ""
             }
         };
 
@@ -216,7 +227,7 @@ async function translateResponse(responseText, targetLanguage = "zh") {
         // 標準化語言代碼
         // 處理特殊情況：如果目標語言是簡體中文或繁體中文的特殊代碼
         let translationTargetLanguage = targetLanguage;
-        
+
         // 語言代碼標準化映射表 (Translation API 使用的標準)
         const languageCodeMap = {
             'zh-tw': 'zh-Hant',
@@ -227,10 +238,10 @@ async function translateResponse(responseText, targetLanguage = "zh") {
             'zh-my': 'zh-Hans',
             'zh': 'zh-Hans'  // 默認為簡體中文
         };
-        
+
         // 轉換為小寫以進行不區分大小寫的比較
         const lowerCaseTargetLang = targetLanguage.toLowerCase();
-        
+
         if (languageCodeMap[lowerCaseTargetLang]) {
             translationTargetLanguage = languageCodeMap[lowerCaseTargetLang];
             console.log(`標準化語言代碼：'${targetLanguage}' -> '${translationTargetLanguage}'`);
@@ -263,7 +274,7 @@ async function textToSpeech(text, targetLanguage = "zh") {
 
     let finalText = text;
     let timeout = 30000; // 預設超時時間 30 秒
-    
+
     // 建立從 Translation API 語言代碼到 Speech API 語言代碼的映射
     // Translation API 使用的是 ISO 639 語言代碼，而 Speech API 使用的是 BCP-47 標準
     const translationToSpeechLangMap = {
@@ -272,7 +283,7 @@ async function textToSpeech(text, targetLanguage = "zh") {
         'zh-Hant': 'zh-TW',
         'zh-CN': 'zh-CN',  // 保持一致，簡體中文
         'zh-TW': 'zh-TW',  // 保持一致，繁體中文
-        'zh': 'zh-TW',     
+        'zh': 'zh-TW',
         'pt-PT': 'pt-PT',
         'pt-BR': 'pt-BR',
         'pt': 'pt-BR',     // 預設巴西葡萄牙語
@@ -280,10 +291,10 @@ async function textToSpeech(text, targetLanguage = "zh") {
         'en-US': 'en-US',
         'en': 'en-US',     // 預設美式英語
     };
-    
+
     // 獲取映射後的語言代碼
     let languageToUse = translationToSpeechLangMap[targetLanguage] || targetLanguage;
-    
+
     // Azure Speech SDK 支援的語言對應表
     const supportedSpeechLanguages = {
         'af': { lang: 'af-ZA', voice: 'af-ZA-AdriNeural' },
@@ -477,14 +488,60 @@ async function GetStorageMetadata(searchResults) {
         return null;
     }
     const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
-    const containerClient = blobServiceClient.getContainerClient("attractions-intro");
-    const blobClient = containerClient.getBlobClient(searchResults[0].document_title);
+    const containerClient = blobServiceClient.getContainerClient("attractions");
+    const blobClient = containerClient.getBlobClient(searchResults[0].title);
 
     const properties = await blobClient.getProperties();
     console.log("Linked file metadata:", properties?.metadata?.imgurl);  // 會印出 target.pdf 或 URL
-    
+
     return properties?.metadata?.imgurl || null;
 }
+
+async function imageAnalyze(imageBuffer) {
+    try {
+        // 呼叫 Azure 內容理解服務進行圖片分析
+        const analyzeUrl = `${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ENDPOINT}/contentunderstanding/analyzers/${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ANALYTIZERID}:analyze?api-version=${process.env.AZURE_AI_CONTENT_UNDERSTANDING_API_VERSION}&stringEncoding=utf16`;
+        const postResponse = await axios.post(analyzeUrl, imageBuffer, {
+            headers: {
+                "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY,
+                "Content-Type": "application/octet-stream"
+            }
+        });
+
+        // 取得 operation-location，開始輪詢
+        const operationLocation = postResponse.headers["operation-location"];
+        if (!operationLocation) {
+            throw new Error("未從回應取得 operation-location");
+        }
+
+        // 輪詢直到完成
+        let result;
+        while (true) {
+            const poll = await axios.get(operationLocation, {
+                headers: { "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY }
+            });
+            result = poll.data;
+            const status = result.status?.toLowerCase();
+            if (status === "succeeded") break;
+            if (status === "failed") {
+                throw new Error(`分析失敗: ${JSON.stringify(result)}`);
+            }
+            console.log(`分析進行中…狀態：${status}`);
+            await new Promise((r) => setTimeout(r, 2000));
+        }
+
+        // 只回傳 AttractionName.valueString
+        const attractionName = result?.result?.contents?.[0]?.fields?.AttractionName?.valueString || null;
+        console.log('分析結果:', attractionName);
+
+        return attractionName;
+
+    } catch (error) {
+        console.error("❌ 圖片分析失敗:", error);
+        throw error;
+    }
+}
+
 
 
 // 取得翻譯語言列表
@@ -529,15 +586,18 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
         console.log(`📷 接收到圖片，開始分析... 選擇語言: ${language}`);
 
 
-        // 1.圖片搜尋
-        const searchResults = await searchAttractions(imageBuffer);
+        // 1.呼叫 Azure AI Content Understanding 分析
+        const AnalyzeResults = await imageAnalyze(imageBuffer);
+
+        // 2.景點相關介紹搜尋
+        const searchResults = await searchAttractions(AnalyzeResults);
 
 
-        // 2.OpenAI 整合
+        // 3.OpenAI 整合
         const response = await generateResponse(searchResults);
         console.log("OpenAI 回應:", response);
 
-        // 翻譯到用戶選擇的語言
+        // 4.翻譯到用戶選擇的語言
         response.text = await translateResponse(response.text, language);
         console.log(`翻譯後的回應 (${language}):`, response.text);
 
@@ -545,7 +605,7 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
         response.language = language;
 
 
-        // 文字轉語音 - 直接在記憶體中處理並回傳
+        // 5.文字轉語音 - 直接在記憶體中處理並回傳
         try {
             const speechResult = await textToSpeech(response.text, language);
             // 將音頻資料添加到回應中
@@ -561,9 +621,10 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
             response.audioError = error.message;
         }
 
+        // 6.獲取圖片存儲的 URL
         const imgurl = await GetStorageMetadata(searchResults);
-        
-        
+
+
         console.log('流程完成');
 
 
