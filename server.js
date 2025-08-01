@@ -138,17 +138,14 @@ async function searchAttractions(searchText) {
         const results = topResult
 
         // 檢查第一筆搜尋結果的分數
-        if (results && results.length > 0) {
-            const firstResultScore = topScore.toFixed(2);
-            console.log("🎯 第一筆搜尋結果分數:", firstResultScore);
-
-            // 如果分數小於 3，視為未找到匹配結果
-            if (firstResultScore < 3) {
-                console.log("⚠️ 搜尋結果分數過低，視為未找到匹配結果");
-                return [];
-            }
+        if (topScore.toFixed(2) < 3) {
+            console.log("⚠️ 搜尋結果分數過低，視為未找到匹配結果");
+            return [];
         }
+
+        // 分數足夠高，返回結果
         return [results];
+
     } catch (error) {
         console.error("❌ 景點搜尋失敗:", error);
         return [];
