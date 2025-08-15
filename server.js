@@ -92,6 +92,31 @@ process.on("SIGINT", () => {
 });
 
 
+// 取得翻譯語言列表
+app.get("/api/languages", async (req, res) => {
+    try {
+        const translateList = await translationClient.path("/languages").get();
+        // #response
+        // {
+        //     "translation": {
+        //     "af": {
+        //         "name": "Afrikaans",
+        //         "nativeName": "Afrikaans",
+        //         "dir": "ltr"
+        //     },
+        //     "am": {
+        //         "name": "Amharic",
+        //         "nativeName": "አማርኛ",
+        //         "dir": "ltr"
+        //     }
+        // ...}
+
+        res.json(translateList.body);
+    } catch (error) {
+        console.error("❌ 取得翻譯語言列表失敗:", error);
+        res.status(500).json({ error: "無法取得翻譯語言列表" });
+    }
+});
 
 
 
@@ -138,7 +163,7 @@ async function searchAttractions(searchText) {
         const results = topResult
 
         // 檢查第一筆搜尋結果的分數
-        if (topScore.toFixed(2) < 3) {
+        if (topScore.toFixed(2) < 2) {
             console.log("⚠️ 搜尋結果分數過低，視為未找到匹配結果");
             return [];
         }
@@ -192,7 +217,8 @@ async function generateResponse(searchResults) {
                 2.景點歷史(history)
                 3.景點描述(description)
                 4.景點開放時間(opening_hours)
-                並確保文字敘述流暢、通順。` },
+                並確保文字敘述流暢、通順。
+                最後務必加上 ([圖片來源]:(imageSource))` },
             ],
             model: "gpt-4o"
         });
@@ -541,31 +567,6 @@ async function imageAnalyze(imageBuffer) {
 
 
 
-// 取得翻譯語言列表
-app.get("/api/languages", async (req, res) => {
-    try {
-        const translateList = await translationClient.path("/languages").get();
-        // #response
-        // {
-        //     "translation": {
-        //     "af": {
-        //         "name": "Afrikaans",
-        //         "nativeName": "Afrikaans",
-        //         "dir": "ltr"
-        //     },
-        //     "am": {
-        //         "name": "Amharic",
-        //         "nativeName": "አማርኛ",
-        //         "dir": "ltr"
-        //     }
-        // ...}
-
-        res.json(translateList.body);
-    } catch (error) {
-        console.error("❌ 取得翻譯語言列表失敗:", error);
-        res.status(500).json({ error: "無法取得翻譯語言列表" });
-    }
-});
 
 // 圖片分析端點
 app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
