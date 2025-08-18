@@ -141,6 +141,12 @@ document.addEventListener('DOMContentLoaded', () => {
         loading.style.display = 'block';
         playBtn.disabled = true;
 
+        // 重置當前語音狀態
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
+
         // 獲取選擇的語言
         const selectedLanguage = uploadLanguageSelector.value;
 
@@ -220,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 使用上傳時選擇的語言
         const selectedLang = uploadLanguageSelector.value;
 
-        // 檢查是否有音頻數據，且語言匹配
+          // 檢查是否有音頻數據，且語言匹配
         if (currentResponse && currentResponse.response.audio &&
             currentResponse.response.audio.content &&
             currentResponse.response.language === selectedLang) {
@@ -268,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // 根據使用者選擇的語言生成新的語音和翻譯文字
-    async function generateSpeech(language = 'zh') {
+    async function generateSpeech(language = 'zh-Hant') {
         if (!currentResponse || !currentResponse.response) {
             alert('沒有可用的景點資訊。');
             return;
@@ -285,9 +291,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    text: currentResponse.response.source.content || currentResponse.response.text,
+                    text: currentResponse.response.text,
                     language: language,
-                    originalContent: currentResponse.response.source
+                    originalContent: currentResponse.response.language
                 })
             });
 
@@ -321,7 +327,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 上傳語言選擇器變更事件 - 如果用戶在上傳前更改了語言選擇
     uploadLanguageSelector.addEventListener('change', () => {
-        // 只需記錄語言變更，實際處理會在上傳時進行
+        // 只需記錄語言變更，實際處理會在點擊播放按鈕時進行
         console.log('語言選擇已更改為:', uploadLanguageSelector.value);
+        
+        // 重設播放按鈕狀態
+        if (currentResponse && currentResponse.response) {
+            playBtn.disabled = false;
+            playBtn.innerHTML = '<i class="bi bi-play-fill"></i> 播放語音導覽';
+        }
     });
 });

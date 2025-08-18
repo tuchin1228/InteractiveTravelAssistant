@@ -4,11 +4,15 @@ const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const axios = require("axios");
+require("dotenv").config();
+const { AzureKeyCredential } = require("@azure/core-auth");
 
-// Azure AI SDK imports
+// Azure AI Translator SDK
 const TextTranslationClient =
     require("@azure-rest/ai-translation-text").default;
-const { AzureKeyCredential } = require("@azure/core-auth");
+
+// Azure AI Speech SDK
 const {
     SpeechConfig,
     AudioConfig,
@@ -18,11 +22,14 @@ const {
     CancellationReason,
     SpeechSynthesisOutputFormat
 } = require("microsoft-cognitiveservices-speech-sdk");
+
+// Azure AI Search SDK
 const { SearchClient } = require("@azure/search-documents");
+
+// Azure OpenAI
 const { AzureOpenAI } = require("openai");
-const axios = require("axios");
-const { text } = require("stream/consumers");
-require("dotenv").config();
+
+// Azure Blob Storage SDK
 const { BlobServiceClient } = require('@azure/storage-blob');
 
 const app = express();
@@ -41,7 +48,7 @@ const upload = multer({ storage: storage });
 
 
 // 全域服務客戶端
-let visionClient, speechConfig, translationClient, searchClient;
+let visionClient, speechConfig, translationClient, searchClient, GPTClient;
 
 // 🚀 初始化 Azure AI 服務
 function initializeAzureServices() {
@@ -64,6 +71,17 @@ function initializeAzureServices() {
             process.env.AZURE_TRANSLATION_ENDPOINT,
             new AzureKeyCredential(process.env.AZURE_TRANSLATION_KEY)
         );
+
+
+        // 使用標準的 API 金鑰驗證
+        GPTClient = new AzureOpenAI({
+            apiKey: process.env.AZURE_OPENAI_KEY,
+            endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+            deployment: "gpt-4o",
+            apiVersion: process.env.AZURE_OPENAI_API_VERSION || "2023-05-15"
+        });
+
+
 
         console.log("✅ 所有 Azure AI 服務初始化完成");
     } catch (error) {
@@ -110,6 +128,7 @@ app.get("/api/languages", async (req, res) => {
         //         "dir": "ltr"
         //     }
         // ...}
+        // console.log('取得翻譯語言列表:', translateList.body);
 
         res.json(translateList.body);
     } catch (error) {
@@ -118,6 +137,52 @@ app.get("/api/languages", async (req, res) => {
     }
 });
 
+
+// 分析圖片景點
+async function imageAnalyze(imageBuffer) {
+    try {
+        // 呼叫 Azure 內容理解服務進行圖片分析
+        const analyzeUrl = `${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ENDPOINT}/contentunderstanding/analyzers/${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ANALYTIZERID}:analyze?api-version=${process.env.AZURE_AI_CONTENT_UNDERSTANDING_API_VERSION}&stringEncoding=utf16`;
+        const postResponse = await axios.post(analyzeUrl, imageBuffer, {
+            headers: {
+                "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY,
+                "Content-Type": "application/octet-stream"
+            }
+        });
+
+        // 取得 operation-location，開始輪詢
+        const operationLocation = postResponse.headers["operation-location"];
+        if (!operationLocation) {
+            throw new Error("未從回應取得 operation-location");
+        }
+
+        // 輪詢直到完成
+        let result;
+        while (true) {
+            const poll = await axios.get(operationLocation, {
+                headers: { "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY }
+            });
+            result = poll.data;
+            const status = result.status?.toLowerCase();
+            if (status === "succeeded") break;
+            if (status === "failed") {
+                throw new Error(`分析失敗: ${JSON.stringify(result)}`);
+            }
+            console.log(`分析進行中…狀態：${status}`);
+            await new Promise((r) => setTimeout(r, 2000));
+        }
+
+        // 只回傳 AttractionName.valueString
+        const attractionName = result?.result?.contents?.[0]?.fields?.AttractionName?.valueString || null;
+        console.log('分析結果:', attractionName);
+
+        return attractionName;
+
+    } catch (error) {
+        console.error("❌ 圖片分析失敗:", error);
+        throw error;
+    }
+}
 
 
 // 🔍 搜尋景點函數
@@ -135,7 +200,7 @@ async function searchAttractions(searchText) {
             queryLanguage: "zh-tw",          // 查詢語言設置為繁體中文
             captions: "extractive",          // 返回摘要
             answers: "extractive",           // 返回答案
-            semanticFields: ["title", "chunk"] // 指定用於語意排名的欄位
+            semanticFields: ["chunk", "title"] // 指定用於語意排名的欄位
         };
 
         const SearchResults = await searchClient.search(searchText, options);
@@ -154,12 +219,10 @@ async function searchAttractions(searchText) {
 
         if (topResult) {
             console.log(`Score: ${topScore.toFixed(2)}`);
-            console.log(topResult);
         } else {
             console.log("沒有找到任何結果");
         }
 
-        console.log("🔍 搜尋結果:", topResult);
         const results = topResult
 
         // 檢查第一筆搜尋結果的分數
@@ -191,23 +254,7 @@ async function generateResponse(searchResults) {
             };
         }
 
-        // 使用 Azure OpenAI SDK 生成回應 (使用 API 金鑰方式)
-        const endpoint = process.env.AZURE_OPENAI_ENDPOINT || "your-openai-endpoint";
-        const apiKey = process.env.AZURE_OPENAI_KEY || "your-openai-key";
-        const deployment = "gpt-4o";
-        const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2023-05-15";
-
-        // 使用標準的 API 金鑰驗證
-        const client = new AzureOpenAI({
-            apiKey: apiKey,
-            endpoint: endpoint,
-            deployment: deployment,
-            apiVersion: apiVersion
-        });
-
-        console.log('prompt', searchResults[0]);
-
-        const events = await client.chat.completions.create({
+        const events = await GPTClient.chat.completions.create({
             messages: [
                 { role: "system", content: "你是一個資深導遊，擅長提供旅遊建議和景點資訊。" },
                 {
@@ -223,7 +270,7 @@ async function generateResponse(searchResults) {
             model: "gpt-4o"
         });
         const response = events.choices[0].message.content;
-        console.log("🤖 回應生成成功:", response);
+        console.log("🤖 回應生成成功");
 
         // 返回生成的回應
         return {
@@ -243,45 +290,29 @@ async function generateResponse(searchResults) {
 
 
 // 翻譯 OpenAI 回應
-async function translateResponse(responseText, targetLanguage = "zh") {
+async function translateResponse(responseText, originalContent, targetLanguage = "zh-Hant") {
     try {
-        console.log("🌐 開始翻譯回應...");
+        console.log("🌐 開始翻譯回應...:", responseText);
+        console.log('來源語言:', originalContent);
+        console.log(`目標語言: ${targetLanguage}`);
 
         // 標準化語言代碼
         // 處理特殊情況：如果目標語言是簡體中文或繁體中文的特殊代碼
         let translationTargetLanguage = targetLanguage;
 
-        // 語言代碼標準化映射表 (Translation API 使用的標準)
-        const languageCodeMap = {
-            'zh-tw': 'zh-Hant',
-            'zh-hk': 'zh-Hant',
-            'zh-mo': 'zh-Hant',
-            'zh-cn': 'zh-Hans',
-            'zh-sg': 'zh-Hans',
-            'zh-my': 'zh-Hans',
-            'zh': 'zh-Hans'  // 默認為簡體中文
-        };
-
-        // 轉換為小寫以進行不區分大小寫的比較
-        const lowerCaseTargetLang = targetLanguage.toLowerCase();
-
-        if (languageCodeMap[lowerCaseTargetLang]) {
-            translationTargetLanguage = languageCodeMap[lowerCaseTargetLang];
-            console.log(`標準化語言代碼：'${targetLanguage}' -> '${translationTargetLanguage}'`);
-        }
-
         const inputText = [{ text: responseText }];
         const parameters = {
             to: translationTargetLanguage,
-            from: "zh",
+            from: originalContent ?? "zh-Hant", // 因為 GPT 的 Prompt 是中文撰寫，所以回應語言預設為中文
         };
+
         const translateResponse = await translationClient.path("/translate").post({
             body: inputText,
             queryParameters: parameters,
         });
 
         const translatedText = translateResponse?.body[0]?.translations[0]?.text;
-        console.log(`🌐 翻譯完成 (${translationTargetLanguage})`);
+        console.log(`🌐 翻譯完成 (${translatedText})`);
         return translatedText;
 
     } catch (error) {
@@ -293,7 +324,7 @@ async function translateResponse(responseText, targetLanguage = "zh") {
 
 
 // 文字轉語音 - 直接返回語音數據，不儲存檔案
-async function textToSpeech(text, targetLanguage = "zh") {
+async function textToSpeech(text, targetLanguage = "zh-TW") {
 
     let finalText = text;
     let timeout = 30000; // 預設超時時間 30 秒
@@ -304,19 +335,14 @@ async function textToSpeech(text, targetLanguage = "zh") {
         // 特殊處理的語言映射 (需特別注意的差異)
         'zh-Hans': 'zh-CN',
         'zh-Hant': 'zh-TW',
-        'zh-CN': 'zh-CN',  // 保持一致，簡體中文
-        'zh-TW': 'zh-TW',  // 保持一致，繁體中文
-        'zh': 'zh-TW',
-        'pt-PT': 'pt-PT',
-        'pt-BR': 'pt-BR',
-        'pt': 'pt-BR',     // 預設巴西葡萄牙語
-        'en-GB': 'en-GB',
-        'en-US': 'en-US',
-        'en': 'en-US',     // 預設美式英語
     };
 
-    // 獲取映射後的語言代碼
-    let languageToUse = translationToSpeechLangMap[targetLanguage] || targetLanguage;
+    // 獲取映射後的語言代碼 - 僅處理特定語言轉換
+    let languageToUse = targetLanguage;
+    // 只針對簡體中文和繁體中文進行特殊映射
+    if (targetLanguage == 'zh-Hans' || targetLanguage == 'zh-Hant') {
+        languageToUse = translationToSpeechLangMap[targetLanguage];
+    }
 
     // Azure Speech SDK 支援的語言對應表
     const supportedSpeechLanguages = {
@@ -395,11 +421,11 @@ async function textToSpeech(text, targetLanguage = "zh") {
         'uz': { lang: 'uz-UZ', voice: 'uz-UZ-MadinaNeural' },
         'vi': { lang: 'vi-VN', voice: 'vi-VN-HoaiMyNeural' },
         'zh-CN': { lang: 'zh-CN', voice: 'zh-CN-XiaoxiaoNeural' },
-        'zh-TW': { lang: 'zh-TW', voice: 'zh-TW-HsiaoChenNeural' }, // 繁體中文 (台灣)
-        'zh-Hans': { lang: 'zh-CN', voice: 'zh-CN-XiaoxiaoNeural' }, // 簡體中文
-        'zh-Hant': { lang: 'zh-TW', voice: 'zh-TW-HsiaoChenNeural' }, // 繁體中文
+        'zh-TW': { lang: 'zh-TW', voice: 'zh-TW-HsiaoChenNeural' },
         'zu': { lang: 'zu-ZA', voice: 'zu-ZA-ThandoNeural' }
     };
+
+
 
     // 檢查語言是否支援語音合成
     let isSpeechLanguageSupported = supportedSpeechLanguages.hasOwnProperty(languageToUse);
@@ -504,7 +530,7 @@ async function textToSpeech(text, targetLanguage = "zh") {
     }
 }
 
-
+// 獲取景點圖片
 async function GetStorageMetadata(searchResults) {
     if (!searchResults || searchResults.length === 0) {
         console.warn("⚠️ 無法獲取存儲Metadata，因為沒有搜尋結果");
@@ -520,55 +546,9 @@ async function GetStorageMetadata(searchResults) {
     return properties?.metadata?.imgurl || null;
 }
 
-async function imageAnalyze(imageBuffer) {
-    try {
-        // 呼叫 Azure 內容理解服務進行圖片分析
-        const analyzeUrl = `${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ENDPOINT}/contentunderstanding/analyzers/${process.env.AZURE_AI_CONTENT_UNDERSTANDING_ANALYTIZERID}:analyze?api-version=${process.env.AZURE_AI_CONTENT_UNDERSTANDING_API_VERSION}&stringEncoding=utf16`;
-        const postResponse = await axios.post(analyzeUrl, imageBuffer, {
-            headers: {
-                "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY,
-                "Content-Type": "application/octet-stream"
-            }
-        });
-
-        // 取得 operation-location，開始輪詢
-        const operationLocation = postResponse.headers["operation-location"];
-        if (!operationLocation) {
-            throw new Error("未從回應取得 operation-location");
-        }
-
-        // 輪詢直到完成
-        let result;
-        while (true) {
-            const poll = await axios.get(operationLocation, {
-                headers: { "Ocp-Apim-Subscription-Key": process.env.AZURE_AI_CONTENT_UNDERSTANDING_KEY }
-            });
-            result = poll.data;
-            const status = result.status?.toLowerCase();
-            if (status === "succeeded") break;
-            if (status === "failed") {
-                throw new Error(`分析失敗: ${JSON.stringify(result)}`);
-            }
-            console.log(`分析進行中…狀態：${status}`);
-            await new Promise((r) => setTimeout(r, 2000));
-        }
-
-        // 只回傳 AttractionName.valueString
-        const attractionName = result?.result?.contents?.[0]?.fields?.AttractionName?.valueString || null;
-        console.log('分析結果:', attractionName);
-
-        return attractionName;
-
-    } catch (error) {
-        console.error("❌ 圖片分析失敗:", error);
-        throw error;
-    }
-}
 
 
-
-
-// 圖片分析端點
+// 圖片分析與資料彙整 API
 app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 
 
@@ -593,10 +573,9 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 
         // 3.OpenAI 整合
         const response = await generateResponse(searchResults);
-        console.log("OpenAI 回應:", response);
 
         // 4.翻譯到用戶選擇的語言
-        response.text = await translateResponse(response.text, language);
+        response.text = await translateResponse(response.text, null, language);
         console.log(`翻譯後的回應 (${language}):`, response.text);
 
         // 儲存選擇的語言
@@ -642,7 +621,7 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
 
 
 
-// 語言翻譯和語音合成 API
+// 切換語言時重新產生語音語翻譯 API
 app.post("/api/translate", express.json(), async (req, res) => {
     try {
         const { text, language, originalContent } = req.body;
@@ -653,8 +632,8 @@ app.post("/api/translate", express.json(), async (req, res) => {
 
         console.log(`🌐 開始翻譯到 ${language}...`);
 
-        // 翻譯文字到目標語言
-        const translatedText = await translateResponse(text, language);
+        // 翻譯舊的內容
+        let translatedText = await translateResponse(text, originalContent, language);
 
         // 生成語音
         const speechResult = await textToSpeech(translatedText, language);
