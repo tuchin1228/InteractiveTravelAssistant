@@ -226,8 +226,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // 使用上傳時選擇的語言
         const selectedLang = uploadLanguageSelector.value;
 
-        // 總是重新生成選定語言的語音
-        await generateSpeech(selectedLang);
+          // 檢查是否有音頻數據，且語言匹配
+        if (currentResponse && currentResponse.response.audio &&
+            currentResponse.response.audio.content &&
+            currentResponse.response.language === selectedLang) {
+            // 使用現有音頻
+            playAudio(currentResponse.response.audio.content, currentResponse.response.audio.contentType);
+        } else {
+            // 如果語言不匹配，重新生成語音
+            await generateSpeech(selectedLang);
+        }
     });
 
     // 播放音頻數據
@@ -283,9 +291,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    text: currentResponse.response.source.content || currentResponse.response.text,
+                    text: currentResponse.response.text,
                     language: language,
-                    originalContent: currentResponse.response.source
+                    originalContent: currentResponse.response.language
                 })
             });
 

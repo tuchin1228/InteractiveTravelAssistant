@@ -290,9 +290,11 @@ async function generateResponse(searchResults) {
 
 
 // 翻譯 OpenAI 回應
-async function translateResponse(responseText, targetLanguage = "zh-Hant") {
+async function translateResponse(responseText, originalContent, targetLanguage = "zh-Hant") {
     try {
-        console.log("🌐 開始翻譯回應...");
+        console.log("🌐 開始翻譯回應...:", responseText);
+        console.log('來源語言:', originalContent);
+        console.log(`目標語言: ${targetLanguage}`);
 
         // 標準化語言代碼
         // 處理特殊情況：如果目標語言是簡體中文或繁體中文的特殊代碼
@@ -301,7 +303,7 @@ async function translateResponse(responseText, targetLanguage = "zh-Hant") {
         const inputText = [{ text: responseText }];
         const parameters = {
             to: translationTargetLanguage,
-            from: "zh-Hant", // 因為 GPT 的 Prompt 是中文撰寫，所以回應語言預設為中文
+            from: originalContent ?? "zh-Hant", // 因為 GPT 的 Prompt 是中文撰寫，所以回應語言預設為中文
         };
 
         const translateResponse = await translationClient.path("/translate").post({
@@ -310,7 +312,7 @@ async function translateResponse(responseText, targetLanguage = "zh-Hant") {
         });
 
         const translatedText = translateResponse?.body[0]?.translations[0]?.text;
-        console.log(`🌐 翻譯完成 (${translationTargetLanguage})`);
+        console.log(`🌐 翻譯完成 (${translatedText})`);
         return translatedText;
 
     } catch (error) {
@@ -573,7 +575,7 @@ app.post("/api/analyzeimage", upload.single("image"), async (req, res) => {
         const response = await generateResponse(searchResults);
 
         // 4.翻譯到用戶選擇的語言
-        response.text = await translateResponse(response.text, language);
+        response.text = await translateResponse(response.text, null, language);
         console.log(`翻譯後的回應 (${language}):`, response.text);
 
         // 儲存選擇的語言
@@ -631,7 +633,7 @@ app.post("/api/translate", express.json(), async (req, res) => {
         console.log(`🌐 開始翻譯到 ${language}...`);
 
         // 翻譯舊的內容
-        let translatedText = await translateResponse(originalContent.text, language);
+        let translatedText = await translateResponse(text, originalContent, language);
 
         // 生成語音
         const speechResult = await textToSpeech(translatedText, language);
