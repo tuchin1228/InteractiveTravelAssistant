@@ -73,13 +73,19 @@ npm install
 將 `.env.sample` 複製為 `.env` 並填入以下 Azure 服務密鑰：
 
 ```
+# Azure AI Content Understanding
+AZURE_AI_CONTENT_UNDERSTANDING_ENDPOINT=azure_ai_foundry_endpoint
+AZURE_AI_CONTENT_UNDERSTANDING_KEY=azure_ai_foundry_key
+AZURE_AI_CONTENT_UNDERSTANDING_API_VERSION=2025-05-01-preview
+AZURE_AI_CONTENT_UNDERSTANDING_ANALYTIZERID=your_content_understanding_analyzer
+
 # Azure Speech 服務
 AZURE_SPEECH_KEY=your_speech_key
 AZURE_SPEECH_REGION=your_speech_region
 
 # Azure Translation 服務
 AZURE_TRANSLATION_KEY=your_translation_key
-AZURE_TRANSLATION_ENDPOINT=https://api.cognitive.microsofttranslator.com/
+AZURE_TRANSLATION_ENDPOINT=azure_ai_foundry_endpoint
 
 # Azure AI Search
 AZURE_SEARCH_KEY=your_search_key
